@@ -12,7 +12,7 @@ Ironclad Analytics has acquired multiple startups. Each startup used a different
 
 * **NetBox-style inventory** (network/infrastructure perspective)
 * **Qualys-style inventory** (scanner/asset risk perspective)
-* **EDR-style inventory** (endpoint runtime/identity perspective)
+* **EDR-style inventory** (crowdstrike runtime/identity perspective)
 
 Your job is to build a **single CLI tool** that can pull inventory from all three systems, normalize the records into a consistent internal `Asset` model, and support analyst workflows like **pulling, listing, searching, and summarizing**.
 
@@ -40,7 +40,7 @@ Your instructor will provide three URLs in your classroom:
 
 * `NETBOX_API_URL`
 * `QUALYS_API_URL`
-* `ENDPOINT_API_URL` (EDR-style)
+* `CROWDSTRIKE_API_URL` (EDR-style)
 
 ---
 
@@ -77,11 +77,14 @@ from typing import Any
 
 NETBOX_API_URL = "PASTE_NETBOX_MOCKAROO_URL"
 QUALYS_API_URL = "PASTE_QUALYS_MOCKAROO_URL"
-ENDPOINT_API_URL = "PASTE_ENDPOINT_MOCKAROO_URL"
+CROWDSTRIKE_API_URL = "PASTE_CROWDSTRIKE_MOCKAROO_URL"
 
 
 def fetch_json(url: str) -> list[dict[str, Any]]:
-    r = requests.get(url, timeout=10)
+    headers = {
+        "X-API-Key": os.environ.get("IRONCLAD_API_KEY")
+    }
+    r = requests.get(url, headers=headers, timeout=10)
     if r.status_code != 200:
         raise RuntimeError(f"GET failed ({r.status_code}): {r.text[:200]}")
     data = r.json()
@@ -107,7 +110,7 @@ def preview_dataset(name: str, url: str) -> None:
 def main():
     preview_dataset("NETBOX", NETBOX_API_URL)
     preview_dataset("QUALYS", QUALYS_API_URL)
-    preview_dataset("ENDPOINT", ENDPOINT_API_URL)
+    preview_dataset("CROWDSTRIKE", CROWDSTRIKE_API_URL)
 
 if __name__ == "__main__":
     main() 
@@ -298,7 +301,7 @@ def quick_test():
     sources = {
         "netbox": NetboxInventorySource(NETBOX_API_URL),
         "qualys": QualysInventorySource(QUALYS_API_URL),
-        "endpoint": CrowdstrikeInventorySource(ENDPOINT_API_URL),
+        "crowdstrike": CrowdstrikeInventorySource(CROWDSTRIKE_API_URL),
     }
 
     for name, src in sources.items():
@@ -375,7 +378,7 @@ def build_manager() -> InventoryManager:
     sources = {
         "netbox": NetboxInventorySource(NETBOX_API_URL),
         "qualys": QualysInventorySource(QUALYS_API_URL),
-        "endpoint": CrowdstrikeInventorySource(ENDPOINT_API_URL),
+        "crowdstrike": CrowdstrikeInventorySource(CROWDSTRIKE_API_URL),
     }
     return InventoryManager(sources)
 
@@ -415,21 +418,21 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
 
     p_pull = sub.add_parser("pull", help="Pull inventory from a source")
-    p_pull.add_argument("--source", choices=["netbox", "qualys", "endpoint", "all"], default="all")
+    p_pull.add_argument("--source", choices=["netbox", "qualys", "crowdstrike", "all"], default="all")
     p_pull.set_defaults(func=cmd_pull)
 
     p_list = sub.add_parser("list", help="List assets")
-    p_list.add_argument("--source", choices=["netbox", "qualys", "endpoint", "all"], default="all")
+    p_list.add_argument("--source", choices=["netbox", "qualys", "crowdstrike", "all"], default="all")
     p_list.set_defaults(func=cmd_list)
 
     p_search = sub.add_parser("search", help="Search assets by keyword")
-    p_search.add_argument("--source", choices=["netbox", "qualys", "endpoint", "all"], default="all")
+    p_search.add_argument("--source", choices=["netbox", "qualys", "crowdstrike", "all"], default="all")
     p_search.add_argument("--query", required=True)
     p_search.add_argument("--limit", type=int, default=50)
     p_search.set_defaults(func=cmd_search)
 
     p_stats = sub.add_parser("stats", help="Show counts by source")
-    p_stats.add_argument("--source", choices=["netbox", "qualys", "endpoint", "all"], default="all")
+    p_stats.add_argument("--source", choices=["netbox", "qualys", "crowdstrike", "all"], default="all")
     p_stats.set_defaults(func=cmd_stats)
 
     args = p.parse_args()
@@ -461,7 +464,7 @@ In `README.md`, include a section:
 
 * **NetBox mapping:** `device_name → hostname`, `primary_ip → ip_address`, etc.
 * **Qualys mapping:** `operating_system → os`, `asset_group → environment`, etc.
-* **Endpoint mapping:** `local_ip → ip_address`, `logged_in_user → owner_context`, etc.
+* **Crowdstrike mapping:** `local_ip → ip_address`, `logged_in_user → owner_context`, etc.
 
 Note that you DO NOT have to use all properties on the inventory item, but you need map to as many of the `Asset()` properties as possible.
 
