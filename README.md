@@ -59,7 +59,7 @@ python -m pip install requests
 
 Create a file:
 
-* `ironclad_inventory_cli.py`
+* `main.py`
 
 ---
 
@@ -69,7 +69,7 @@ Create a file:
 
 Before modeling anything, you must **inspect each dataset** to learn its field names.
 
-Add this starter code:
+Add this starter code to your `main.py`
 
 ```python
 import requests
@@ -104,11 +104,13 @@ def preview_dataset(name: str, url: str) -> None:
     for k in data[0].keys():
         print(" -", k)
 
-
-if __name__ == "__main__":
+def main():
     preview_dataset("NETBOX", NETBOX_API_URL)
     preview_dataset("QUALYS", QUALYS_API_URL)
     preview_dataset("ENDPOINT", ENDPOINT_API_URL)
+
+if __name__ == "__main__":
+    main() 
 ```
 
 ✅ **Deliverable checkpoint:** Run the script and paste output (or screenshot) showing:
@@ -122,28 +124,29 @@ if __name__ == "__main__":
 # Part 2 — Walkthrough: Build the Core Classes (Classes First)
 
 ## Step 2.1 — Define the normalized `Asset` model
-
-Replace your `__main__` block temporarily with class definitions (you’ll add CLI later).
-
+Create a file called `asset.py` which will have the following code in it. This will represent your generic and universal `Asset` which can represent an asset from any of the multiple inventory sources, e.g. Qualys, Netbox, Crowdstrike, or more. This is the key to building a tool that's able to work with multiple inventory sources, i.e. having a universal entity that can fit the shape for an asset belonging to multiple inventories.
 ```python
-from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional, Any
 
-
-@dataclass
 class Asset:
-    """
-    Ironclad normalized asset model.
-    Every inventory record from any source must be converted into this shape.
-    """
     asset_id: str
     hostname: str
     ip_address: Optional[str]
     os: Optional[str]
     environment: Optional[str]
-    owner_context: Optional[str]  # team, group, or user (depends on source)
-    source: str                   # "netbox" | "qualys" | "endpoint"
-    raw: dict[str, Any]           # original record for traceability
+    owner_context: Optional[str]
+    source: str
+    raw: dict[str, Any]
+
+    def __init__(self, *args, **kwargs):
+        self.asset_id = kwargs.get("asset_id")
+        self.hostname = kwargs.get("hostname", "")
+        self.ip_address = kwargs.get("ip_address")
+        self.os = kwargs.get("os")
+        self.environment = kwargs.get("environmnet")
+        self.owner_context = kwargs.get("owner_context")
+        self.source = kwargs.get("source", "")
+        self.raw = kwargs.get("raw", {})
 
     def matches(self, query: str) -> bool:
         q = query.lower()
@@ -156,14 +159,18 @@ class Asset:
             self.owner_context or "",
             self.source,
         ]
+        
         return any(q in str(v).lower() for v in values)
-
+    
     def summary(self) -> str:
         return (
             f"[{self.source}] {self.hostname} "
             f"ip={self.ip_address or 'n/a'} os={self.os or 'n/a'} "
             f"env={self.environment or 'n/a'} owner={self.owner_context or 'n/a'}"
         )
+    
+    def __str__(self):
+        return self.summary()
 ```
 
 Why this matters:
@@ -174,10 +181,13 @@ Why this matters:
 ---
 
 ## Step 2.2 — Create an Inventory Source base class
-
+Create a new file called `inventory_source.py` and add the following snippet to it.  
+Note that the `normalize()` WILL have a NotImplementedError raised because it gets overridden elsewhere later. So don't worry about it.
 ```python
-import requests
 from typing import Any
+from asset import Asset
+import requests
+import os
 
 
 class InventorySource:
@@ -186,8 +196,11 @@ class InventorySource:
     def __init__(self, api_url: str):
         self.api_url = api_url
 
-    def fetch_raw(self) -> list[dict[str, Any]]:
-        r = requests.get(self.api_url, timeout=10)
+    def fetch_raw(self):
+        headers = {
+            "X-API-Key": os.environ.get("IRONCLAD_API_KEY")
+        }
+        r = requests.get(self.api_url, headers=headers, timeout=10)
         if r.status_code != 200:
             raise RuntimeError(f"{self.name} fetch failed ({r.status_code}): {r.text[:200]}")
         data = r.json()
@@ -196,12 +209,15 @@ class InventorySource:
         return data
 
     def normalize(self, record: dict[str, Any]) -> Asset:
-        """Override in subclasses to map record -> Asset."""
         raise NotImplementedError
-
+    
     def fetch_assets(self) -> list[Asset]:
         raw = self.fetch_raw()
-        return [self.normalize(rec) for rec in raw]
+        results = []
+        for each_record in raw:
+            results.append(self.normalize(each_record))
+
+        return results
 ```
 
 ---
@@ -209,7 +225,7 @@ class InventorySource:
 ## Step 2.3 — Implement the 3 source adapters (Students map fields)
 
 ### NetBox adapter
-
+In the `inventory_source.py` file add this inventory source adapter:
 ```python
 class NetboxInventorySource(InventorySource):
     name = "netbox"
@@ -231,7 +247,7 @@ class NetboxInventorySource(InventorySource):
 ```
 
 ### Qualys adapter
-
+In the `inventory_source.py` file add this inventory source adapter:
 ```python
 class QualysInventorySource(InventorySource):
     name = "qualys"
@@ -252,14 +268,15 @@ class QualysInventorySource(InventorySource):
         )
 ```
 
-### Endpoint/EDR adapter
+### Crowdstrike/EDR adapter
+In the `inventory_source.py` file add this inventory source adapter:
 
 ```python
-class EndpointInventorySource(InventorySource):
-    name = "endpoint"
+class CrowdstrikeInventorySource(InventorySource):
+    name = "crowdstrike"
 
     def normalize(self, record: dict[str, Any]) -> Asset:
-        # TODO: Map Endpoint schema fields based on your preview output.
+        # TODO: Map crowdstrike schema fields based on your preview output.
         # Suggested schema fields:
         # sensor_id, hostname, local_ip, os_version, logged_in_user, policy_applied, ...
         return Asset(
@@ -281,12 +298,13 @@ def quick_test():
     sources = {
         "netbox": NetboxInventorySource(NETBOX_API_URL),
         "qualys": QualysInventorySource(QUALYS_API_URL),
-        "endpoint": EndpointInventorySource(ENDPOINT_API_URL),
+        "endpoint": CrowdstrikeInventorySource(ENDPOINT_API_URL),
     }
 
     for name, src in sources.items():
         assets = src.fetch_assets()
         print(f"\n{name}: pulled {len(assets)} assets")
+        # This will grab the first 3 elements out of `assets`. Feel free to change to `[:1]` or `[:2]` or any other number you want to get different quantities of assets
         for a in assets[:3]:
             print(" ", a.summary())
 
@@ -298,8 +316,12 @@ if __name__ == "__main__":
 ---
 
 # Part 3 — Walkthrough: Inventory Manager (Composition)
+Create a file called `inventory_manager.py` and put the following InventoryManager in it.
 
 ```python
+from inventory_source import InventorySource
+from asset import Asset
+
 class InventoryManager:
     def __init__(self, sources: dict[str, InventorySource]):
         self.sources = sources
@@ -330,11 +352,6 @@ class InventoryManager:
         return counts
 ```
 
-✅ **Checkpoint:** After pulling `all`, verify:
-
-* `stats()["total"] > 0`
-* counts by source make sense
-
 ---
 
 # Part 4 — Walkthrough: Build the CLI (argparse)
@@ -342,14 +359,23 @@ class InventoryManager:
 Replace your `__main__` with a real CLI:
 
 ```python
+import requests
+import os
+from typing import Any
+from inventory_source import NetboxInventorySource, QualysInventorySource, CrowdstrikeInventorySource
+from inventory_manager import InventoryManager
 import argparse
+
+NETBOX_API_URL = "https://my.api.mockaroo.com/ironclad/netbox/inventory.json"
+QUALYS_API_URL = "https://my.api.mockaroo.com/ironclad/qualys/inventory.json"
+CROWDSTRIKE_API_URL = "https://my.api.mockaroo.com/ironclad/crowdstrike/inventory.json"
 
 
 def build_manager() -> InventoryManager:
     sources = {
         "netbox": NetboxInventorySource(NETBOX_API_URL),
         "qualys": QualysInventorySource(QUALYS_API_URL),
-        "endpoint": EndpointInventorySource(ENDPOINT_API_URL),
+        "endpoint": CrowdstrikeInventorySource(ENDPOINT_API_URL),
     }
     return InventoryManager(sources)
 
@@ -415,12 +441,14 @@ if __name__ == "__main__":
 ```
 
 ✅ Required CLI behaviors (demo in your submission):
-
+Feel free to change or adapt some of these commands as you see fit. Main goal is to see that each of the commands for your CLI tool are working and show data and interactions with multiple inventories.
 ```bash
-python ironclad_inventory_cli.py pull --source all
-python ironclad_inventory_cli.py list --source netbox
-python ironclad_inventory_cli.py search --query windows --source all
-python ironclad_inventory_cli.py stats --source all
+python main.py pull --source all
+python main.py list --source netbox
+python main.py search --query windows --source all
+python main.py search --query "Windows 11" --source all
+python main.py search --query "Windows 11" --source all --limit 500
+python main.py stats --source all
 ```
 
 ---
@@ -434,6 +462,8 @@ In `README.md`, include a section:
 * **NetBox mapping:** `device_name → hostname`, `primary_ip → ip_address`, etc.
 * **Qualys mapping:** `operating_system → os`, `asset_group → environment`, etc.
 * **Endpoint mapping:** `local_ip → ip_address`, `logged_in_user → owner_context`, etc.
+
+Note that you DO NOT have to use all properties on the inventory item, but you need map to as many of the `Asset()` properties as possible.
 
 ## B) Output quality
 
@@ -467,12 +497,12 @@ Support:
 Add:
 
 ```bash
-python ironclad_inventory_cli.py find-ip --ip 10.0.0.5
+python main.py find-ip --ip 10.0.0.5
 ```
 
 ### Challenge E — Cache to disk
 
-Save pulled normalized assets to `inventory_cache.json` and allow `--from-cache`.
+Save pulled normalized assets to `inventory_cache.json` and allow `--from-cache` options when using the `search` and `list` commands which should use the `inventory_cache.json` as the inventory source instead of the API urls.
 
 ---
 
@@ -480,7 +510,7 @@ Save pulled normalized assets to `inventory_cache.json` and allow `--from-cache`
 
 Submit:
 
-1. `ironclad_inventory_cli.py`
+1. `main.py`
 2. `README.md` containing:
 
    * how to run each CLI command
