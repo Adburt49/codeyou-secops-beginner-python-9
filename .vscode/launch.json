@@ -1,0 +1,41 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "env": {
+                "IRONCLAD_API_KEY": "cf7bbbd0"
+            }
+        },
+        {
+            "name": "Python Debugger: list assets",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": ["list", "--source", "all"],
+            "env": {
+                "IRONCLAD_API_KEY": "cf7bbbd0"
+            }
+        },
+        {
+            "name": "Python Debugger: search assets",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": ["search", "--query", "Windows 11", "--limit", "550"],
+            "env": {
+                "IRONCLAD_API_KEY": "cf7bbbd0"
+            }
+        }
+    ]
+}
