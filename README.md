@@ -1,4 +1,45 @@
-## New Inputs You’ll Need
+# 🛡️ Assignment: From Vulnerability to Ticket
+
+## Extending the Ironclad Unified Inventory CLI
+
+---
+
+## 📘 Scenario
+
+Ironclad Analytics now has a unified inventory across multiple systems. Leadership’s next question:
+
+> “Which of our assets are vulnerable — and who is fixing them?”
+
+Your team has been asked to:
+
+1. Pull vulnerability findings from a new API endpoint
+2. Correlate those findings to known inventory assets
+3. Prioritize vulnerabilities based on risk
+4. Create Trello cards to simulate remediation tickets
+
+This assignment models how real security teams operationalize vulnerability data.
+
+---
+Reference: You can find docs on how to get and setup the values used from Trello in [the trello docs of this repo](./docs/trello_setting_up_api_access.md). You WILL need to setup an account for Trello for this assignment.
+
+## 🎯 Learning Objectives
+
+By completing this assignment, you will:
+
+* Correlate security findings to asset inventory
+* Derive severity from CVSS scores
+* Apply risk-based prioritization logic
+* Integrate with a third-party REST API (Trello)
+* Generate structured remediation tickets
+* Simulate a real vulnerability management workflow
+
+---
+
+# 🧩 Part 1 — Walkthrough
+
+This section guides you through the core functionality.
+
+---
 
 ### A) Vulnerability API endpoint
 
@@ -209,6 +250,8 @@ def should_ticket(asset: Asset, vuln: Vulnerability) -> bool:
 
 ## 5) Step: Create a Trello card (ticket)
 
+You can find docs on how to get these values for your Trello environment variables in [the trello docs of this repo](./docs/trello_setting_up_api_access.md).
+
 ### A) Minimal Trello client
 
 Create: **`trello_client.py`**
@@ -372,3 +415,124 @@ if key in seen:
     continue
 seen.add(key)
 ```
+
+---
+
+# 🧩 Part 2 — Required Deliverables
+
+Students must submit:
+
+* Updated CLI code
+* Screenshot of Trello board showing generated cards
+* Terminal output showing:
+
+  * number of vulnerabilities
+  * number of tickets created
+* README explaining:
+
+  * their prioritization logic
+  * how they derived severity
+
+---
+
+# 🧠 Part 3 — Challenges (Choose 3)
+
+## 🔹 Challenge 1 — Duplicate Prevention
+
+Do not create a ticket if one already exists for the same `(hostname, cve_id)`.
+
+Hint:
+
+* Use Trello API to list cards first
+* Or track created keys locally
+
+---
+
+## 🔹 Challenge 2 — SLA Enforcement
+
+Add due dates:
+
+* Critical → 7 days
+* High → 14 days
+* Medium → 30 days
+
+Trello supports `due` parameter.
+
+---
+
+## 🔹 Challenge 3 — Label by Severity
+
+Create labels in Trello for:
+
+* Critical
+* High
+* Medium
+* Low
+
+Attach labels when creating card.
+
+---
+
+## 🔹 Challenge 4 — Owner-Based Assignment
+
+If `asset.owner_context` exists:
+
+* Map owner → Trello member
+* Auto-assign the card
+
+---
+
+## 🔹 Challenge 5 — Metrics Dashboard Output
+
+Print:
+
+```
+Tickets created: 12
+Critical: 3
+High: 6
+Medium: 3
+By Team:
+  Finance: 4
+  HR: 2
+  IT: 6
+```
+
+---
+
+## 🔹 Challenge 6 — Risk Escalation Rule
+
+If:
+
+* internet_exposed == True
+  AND
+* exploit_available == True
+
+Then treat medium as high.
+
+---
+
+# 📊 Grading Rubric (100 pts)
+
+| Category                     | Points |
+| ---------------------------- | ------ |
+| Vulnerability ingestion      | 15     |
+| Correlation to assets        | 15     |
+| Severity derivation          | 15     |
+| Prioritization logic         | 15     |
+| Trello integration works     | 20     |
+| Code structure & cleanliness | 10     |
+| Challenges (3 × 5 pts)       | 15     |
+
+---
+
+# 🧠 Why This Assignment Matters
+
+This simulates:
+
+* Vulnerability management workflows
+* Security-to-operations handoffs
+* Risk-based remediation
+* API-driven automation
+* SOC + DevOps collaboration
+
+Students now move beyond “finding problems” into “operationalizing security.”
