@@ -4,10 +4,16 @@ from typing import Any
 from inventory_source import NetboxInventorySource, QualysInventorySource, CrowdstrikeInventorySource
 from inventory_manager import InventoryManager
 import argparse
+from vulnerability_source import VulnerabilitySource
+from vulnerability_attach import attach_vulnerabilities
+from prioritization import should_ticket
+from trello_client import TrelloClient
+from ticket_builder import build_ticket
 
 NETBOX_API_URL = "https://my.api.mockaroo.com/ironclad/netbox/inventory.json"
 QUALYS_API_URL = "https://my.api.mockaroo.com/ironclad/qualys/inventory.json"
 CROWDSTRIKE_API_URL = "https://my.api.mockaroo.com/ironclad/crowdstrike/inventory.json"
+VULN_API_URL = "https://my.api.mockaroo.com/ironclad/vulns/findings.json"
 
 headers = {
     "X-API-Key": os.environ.get("IRONCLAD_API_KEY")
@@ -50,6 +56,33 @@ def cmd_stats(args) -> None:
     mgr.pull(args.source)
     print("Stats:", mgr.stats())
 
+def cmd_ticket(args) -> None:
+    mgr = build_manager()
+    mgr.pull(args.source)
+
+    vuln_src = VulnerabilitySource(VULN_API_URL, headers=headers)
+    vulns = vuln_src.fetch_vulns()
+
+    attach_vulnerabilities(mgr.assets, vulns)
+
+    trello = TrelloClient()
+    created = 0
+
+    for asset in mgr.assets:
+        asset_vulns = getattr(asset, "vulnerabilities", [])
+        for v in asset_vulns:
+            if should_ticket(asset, v):
+                title, desc = build_ticket(asset, v)
+                trello.create_card(name=title, desc=desc)
+                created += 1
+
+                if args.limit and created >= args.limit:
+                    print(f"Created {created} cards (limit reached).")
+                    return
+
+    print(f"Created {created} Trello cards.")
+
+
 def main():
     p = argparse.ArgumentParser(prog="ironclad-inventory", description="Ironclad Unified Inventory CLI")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -71,6 +104,11 @@ def main():
     p_stats = sub.add_parser("stats", help="Show counts by source")
     p_stats.add_argument("--source", choices=["netbox", "qualys", "crowdstrike", "all"], default="all")
     p_stats.set_defaults(func=cmd_stats)
+
+    p_ticket = sub.add_parser("ticket", help="Create Trello tickets for prioritized vulnerabilities")
+    p_ticket.add_argument("--source", choices=["netbox", "qualys", "crowdstrike", "all"], default="all")
+    p_ticket.add_argument("--limit", type=int, default=20, help="Max cards to create in one run")
+    p_ticket.set_defaults(func=cmd_ticket)
 
     args = p.parse_args()
     args.func(args)
