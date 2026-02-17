@@ -12,7 +12,7 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "env": {
-                "IRONCLAD_API_KEY": "cf7bbbd0"
+                "IRONCLAD_API_KEY": "<insert ironclad api key>"
             }
         },
         {
@@ -23,7 +23,7 @@
             "console": "integratedTerminal",
             "args": ["list", "--source", "all"],
             "env": {
-                "IRONCLAD_API_KEY": "cf7bbbd0"
+                "IRONCLAD_API_KEY": "<insert ironclad api key>"
             }
         },
         {
@@ -34,7 +34,22 @@
             "console": "integratedTerminal",
             "args": ["search", "--query", "Windows 11", "--limit", "550"],
             "env": {
-                "IRONCLAD_API_KEY": "cf7bbbd0"
+                "IRONCLAD_API_KEY": "<insert ironclad api key>"
+            }
+        },
+        {
+            "name": "Python Debugger: create tickets from vulns",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": ["ticket", "--source", "all", "--limit", "3"],
+            "env": {
+                "IRONCLAD_API_KEY": "<insert ironclad api key>",
+                "TRELLO_BOARD_ID": "<insert board ID>",
+                "TRELLO_LIST_ID": "<insert list ID>",
+                "TRELLO_TOKEN": "<insert trello token>",
+                "TRELLO_KEY": "<insert trello API Key>"
             }
         }
     ]
