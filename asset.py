@@ -15,7 +15,7 @@ class Asset:
         self.hostname = kwargs.get("hostname", "")
         self.ip_address = kwargs.get("ip_address")
         self.os = kwargs.get("os")
-        self.environment = kwargs.get("environmnet")
+        self.environment = kwargs.get("environment")
         self.owner_context = kwargs.get("owner_context")
         self.source = kwargs.get("source", "")
         self.raw = kwargs.get("raw", {})
