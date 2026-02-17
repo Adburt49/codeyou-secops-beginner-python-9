@@ -1,517 +1,374 @@
-# 🐍 Python Assignment
+## New Inputs You’ll Need
 
-## Ironclad Unified Inventory CLI
+### A) Vulnerability API endpoint
 
-### Modeling and normalizing asset data across NetBox, Qualys, and EDR inventories
+Add a new Mockaroo URL like:
 
----
+```python
+VULN_API_URL = "https://my.api.mockaroo.com/ironclad/vulns/findings.json"
+```
 
-## Introduction
+Your dataset should include fields that can tie back to inventory, e.g.:
 
-Ironclad Analytics has acquired multiple startups. Each startup used a different “source of truth” for asset inventory:
+* `asset_hostname` (preferred)
+* `asset_ip` (fallback)
+* `cve_id`
+* `severity`
+* `cvss_score`
+* `exploit_available`
+* `recommended_fix`
+* `status`
 
-* **NetBox-style inventory** (network/infrastructure perspective)
-* **Qualys-style inventory** (scanner/asset risk perspective)
-* **EDR-style inventory** (endpoint runtime/identity perspective)
+### B) Trello credentials (as environment variables)
 
-Your job is to build a **single CLI tool** that can pull inventory from all three systems, normalize the records into a consistent internal `Asset` model, and support analyst workflows like **pulling, listing, searching, and summarizing**.
-
-> **Important:** This assignment is **inventory only**.
-> We will extend it later to enrich assets with vulnerabilities and create Trello cards — **do not implement that yet**.
-
----
-
-## Learning Objectives
-
-You will practice:
-
-* Fetching JSON from multiple APIs with `requests`
-* Inspecting unfamiliar schemas and mapping fields correctly
-* Designing classes with clean methods (OOP)
-* Normalizing data into one consistent internal model
-* Building a multi-command CLI with `argparse`
-* Writing code designed to be extended later
-
----
-
-## Provided Resources
-
-Your instructor will provide three URLs in your classroom:
-
-* `NETBOX_API_URL`
-* `QUALYS_API_URL`
-* `ENDPOINT_API_URL` (EDR-style)
-
----
-
-# Part 0 — Setup
-
-### Requirements
-
-* Python 3.10+
-* `requests`
-
-Install:
+Students should set these:
 
 ```bash
-python -m pip install requests
+export TRELLO_KEY="..."
+export TRELLO_TOKEN="..."
+export TRELLO_BOARD_ID="..."
+export TRELLO_LIST_ID="..."   # e.g., "Backlog"
 ```
-
-Create a file:
-
-* `ironclad_inventory_cli.py`
 
 ---
 
-# Part 1 — Walkthrough: Fetch + Inspect the JSON (Required)
+## 1) Step: Create a `Vulnerability` class
 
-### Goal
-
-Before modeling anything, you must **inspect each dataset** to learn its field names.
-
-Add this starter code:
+Create a new file: **`vulnerability.py`**
 
 ```python
-import requests
-from typing import Any
-
-NETBOX_API_URL = "PASTE_NETBOX_MOCKAROO_URL"
-QUALYS_API_URL = "PASTE_QUALYS_MOCKAROO_URL"
-ENDPOINT_API_URL = "PASTE_ENDPOINT_MOCKAROO_URL"
-
-
-def fetch_json(url: str) -> list[dict[str, Any]]:
-    r = requests.get(url, timeout=10)
-    if r.status_code != 200:
-        raise RuntimeError(f"GET failed ({r.status_code}): {r.text[:200]}")
-    data = r.json()
-    if not isinstance(data, list):
-        raise RuntimeError("Expected a list of records from the API.")
-    # ensure dict-like records
-    for i, rec in enumerate(data[:3]):
-        if not isinstance(rec, dict):
-            raise RuntimeError(f"Record {i} is not an object/dict.")
-    return data
-
-
-def preview_dataset(name: str, url: str) -> None:
-    data = fetch_json(url)
-    print(f"\n=== {name} PREVIEW ===")
-    print(f"Records: {len(data)}")
-    print("First record:")
-    print(data[0])
-    print("Fields:")
-    for k in data[0].keys():
-        print(" -", k)
-
-
-if __name__ == "__main__":
-    preview_dataset("NETBOX", NETBOX_API_URL)
-    preview_dataset("QUALYS", QUALYS_API_URL)
-    preview_dataset("ENDPOINT", ENDPOINT_API_URL)
-```
-
-✅ **Deliverable checkpoint:** Run the script and paste output (or screenshot) showing:
-
-* first record
-* field list
-  for **each** source.
-
----
-
-# Part 2 — Walkthrough: Build the Core Classes (Classes First)
-
-## Step 2.1 — Define the normalized `Asset` model
-
-Replace your `__main__` block temporarily with class definitions (you’ll add CLI later).
-
-```python
-from dataclasses import dataclass
 from typing import Any, Optional
 
+class Vulnerability:
+    def __init__(self, raw: dict[str, Any]):
+        self.raw = raw
 
-@dataclass
-class Asset:
-    """
-    Ironclad normalized asset model.
-    Every inventory record from any source must be converted into this shape.
-    """
-    asset_id: str
-    hostname: str
-    ip_address: Optional[str]
-    os: Optional[str]
-    environment: Optional[str]
-    owner_context: Optional[str]  # team, group, or user (depends on source)
-    source: str                   # "netbox" | "qualys" | "endpoint"
-    raw: dict[str, Any]           # original record for traceability
+        # TODO: map these keys to your Mockaroo vuln schema
+        self.cve_id: str = raw.get("cve_id", "UNKNOWN-CVE")
+        self.title: str = raw.get("vuln_title", "Untitled Vulnerability")
 
-    def matches(self, query: str) -> bool:
-        q = query.lower()
-        values = [
-            self.asset_id,
-            self.hostname,
-            self.ip_address or "",
-            self.os or "",
-            self.environment or "",
-            self.owner_context or "",
-            self.source,
-        ]
-        return any(q in str(v).lower() for v in values)
+        self.cvss_score: Optional[float] = raw.get("cvss_score")
+        self.exploit_available: bool = bool(raw.get("exploit_available", False))
+        self.recommended_fix: str = raw.get("recommended_fix", "")
 
-    def summary(self) -> str:
-        return (
-            f"[{self.source}] {self.hostname} "
-            f"ip={self.ip_address or 'n/a'} os={self.os or 'n/a'} "
-            f"env={self.environment or 'n/a'} owner={self.owner_context or 'n/a'}"
-        )
+        # These tie back to assets
+        self.asset_hostname: str = raw.get("asset_hostname", "")
+        self.asset_ip: Optional[str] = raw.get("asset_ip")
+
+        # Optional fields if you include them
+        self.status: str = raw.get("status", "open")
+
+    def key(self) -> str:
+        """Used for deduping: same vuln on same host."""
+        return f"{self.asset_hostname}|{self.cve_id}"
+
+    def __str__(self) -> str:
+        return f"[{self.severity.upper()}] {self.cve_id} on {self.asset_hostname}"
 ```
-
-Why this matters:
-
-* You’re defining a **single truth** inside your tool.
-* Every source must adapt to *this*, not the other way around.
 
 ---
 
-## Step 2.2 — Create an Inventory Source base class
+## 2) Step: Pull vulnerabilities from the new API
+
+Create a new file: **`vulnerability_source.py`**
 
 ```python
 import requests
 from typing import Any
+from vulnerability import Vulnerability
 
-
-class InventorySource:
-    name: str = "base"
-
-    def __init__(self, api_url: str):
+class VulnerabilitySource:
+    def __init__(self, api_url: str, headers: dict[str, str] | None = None):
         self.api_url = api_url
+        self.headers = headers or {}
 
     def fetch_raw(self) -> list[dict[str, Any]]:
-        r = requests.get(self.api_url, timeout=10)
+        r = requests.get(self.api_url, headers=self.headers, timeout=10)
         if r.status_code != 200:
-            raise RuntimeError(f"{self.name} fetch failed ({r.status_code}): {r.text[:200]}")
+            raise RuntimeError(f"Vuln API failed ({r.status_code}): {r.text[:200]}")
         data = r.json()
         if not isinstance(data, list):
-            raise RuntimeError(f"{self.name} returned unexpected JSON (expected list).")
+            raise RuntimeError("Expected list of vuln records.")
         return data
 
-    def normalize(self, record: dict[str, Any]) -> Asset:
-        """Override in subclasses to map record -> Asset."""
-        raise NotImplementedError
+    def fetch_vulns(self) -> list[Vulnerability]:
+        return [Vulnerability(rec) for rec in self.fetch_raw()]
+```
 
-    def fetch_assets(self) -> list[Asset]:
-        raw = self.fetch_raw()
-        return [self.normalize(rec) for rec in raw]
+✅ **Checkpoint snippet** (students run this in a small test script or REPL):
+
+```python
+src = VulnerabilitySource(VULN_API_URL, headers=headers)
+vulns = src.fetch_vulns()
+print("Vulns:", len(vulns))
+print(vulns[0])
 ```
 
 ---
 
-## Step 2.3 — Implement the 3 source adapters (Students map fields)
+## 3) Step: Attach vulnerabilities to assets (without changing Asset class much)
 
-### NetBox adapter
+Because your `Asset` class doesn’t have a `vulnerabilities` field yet, we’ll attach them dynamically *or* use a wrapper.
+
+### Option A (simplest): attach an attribute dynamically
+
+In Python, you can do:
 
 ```python
-class NetboxInventorySource(InventorySource):
-    name = "netbox"
-
-    def normalize(self, record: dict[str, Any]) -> Asset:
-        # TODO: Map NetBox schema fields based on your preview output.
-        # Suggested schema fields (from your Mockaroo design):
-        # id, device_name, primary_ip, platform, environment, tenant, ...
-        return Asset(
-            asset_id=str(record.get("id")),                 # TODO confirm key
-            hostname=str(record.get("device_name")),        # TODO confirm key
-            ip_address=record.get("primary_ip"),            # TODO confirm key
-            os=record.get("platform"),                      # TODO confirm key
-            environment=record.get("environment"),          # TODO confirm key
-            owner_context=record.get("tenant"),             # TODO confirm key
-            source=self.name,
-            raw=record,
-        )
+asset.vulnerabilities = []
 ```
 
-### Qualys adapter
+Create: **`vulnerability_attach.py`**
 
 ```python
-class QualysInventorySource(InventorySource):
-    name = "qualys"
+from typing import Dict, List
+from asset import Asset
+from vulnerability import Vulnerability
 
-    def normalize(self, record: dict[str, Any]) -> Asset:
-        # TODO: Map Qualys schema fields based on your preview output.
-        # Suggested schema fields:
-        # asset_id (UUID), hostname, ip_address, operating_system, asset_group, criticality, ...
-        return Asset(
-            asset_id=str(record.get("asset_id")),           # TODO confirm key
-            hostname=str(record.get("hostname")),           # TODO confirm key
-            ip_address=record.get("ip_address"),            # TODO confirm key
-            os=record.get("operating_system"),              # TODO confirm key
-            environment=record.get("asset_group"),          # TODO map group -> environment
-            owner_context=None,                             # TODO if your schema has owner/team, map it
-            source=self.name,
-            raw=record,
-        )
+def attach_vulnerabilities(assets: list[Asset], vulns: list[Vulnerability]) -> None:
+    # 1) Create an index of vulns by hostname/ip
+    vulns_by_host: Dict[str, List[Vulnerability]] = {}
+    vulns_by_ip: Dict[str, List[Vulnerability]] = {}
+
+    for v in vulns:
+        if v.asset_hostname:
+            vulns_by_host.setdefault(v.asset_hostname.lower(), []).append(v)
+        if v.asset_ip:
+            vulns_by_ip.setdefault(v.asset_ip, []).append(v)
+
+    # 2) Attach to each asset (mutating the original objects in the list)
+    for each_asset in assets:
+        each_asset.vulnerabilities = []  # overwrite each run (or keep + extend if you prefer)
+
+        if each_asset.hostname and each_asset.hostname.lower() in vulns_by_host:
+            each_asset.vulnerabilities.extend(vulns_by_host[each_asset.hostname.lower()])
+
+        if each_asset.ip_address and each_asset.ip_address in vulns_by_ip:
+            # Add any IP-matched vulns that weren't already included by hostname
+            existing = {vv.key() for vv in each_asset.vulnerabilities}
+            for vv in vulns_by_ip[each_asset.ip_address]:
+                if vv.key() not in existing:
+                    each_asset.vulnerabilities.append(vv)
 ```
 
-### Endpoint/EDR adapter
+✅ **Checkpoint:**
 
 ```python
-class EndpointInventorySource(InventorySource):
-    name = "endpoint"
-
-    def normalize(self, record: dict[str, Any]) -> Asset:
-        # TODO: Map Endpoint schema fields based on your preview output.
-        # Suggested schema fields:
-        # sensor_id, hostname, local_ip, os_version, logged_in_user, policy_applied, ...
-        return Asset(
-            asset_id=str(record.get("sensor_id")),          # TODO confirm key
-            hostname=str(record.get("hostname")),           # TODO confirm key
-            ip_address=record.get("local_ip"),              # TODO choose local_ip as primary
-            os=record.get("os_version"),                    # TODO confirm key
-            environment=None,                               # TODO if you have env-like field, map it
-            owner_context=record.get("logged_in_user"),     # TODO confirm key
-            source=self.name,
-            raw=record,
-        )
-```
-
-✅ **Checkpoint:** Add a quick test function and run it:
-
-```python
-def quick_test():
-    sources = {
-        "netbox": NetboxInventorySource(NETBOX_API_URL),
-        "qualys": QualysInventorySource(QUALYS_API_URL),
-        "endpoint": EndpointInventorySource(ENDPOINT_API_URL),
-    }
-
-    for name, src in sources.items():
-        assets = src.fetch_assets()
-        print(f"\n{name}: pulled {len(assets)} assets")
-        for a in assets[:3]:
-            print(" ", a.summary())
-
-
-if __name__ == "__main__":
-    quick_test()
+attach_vulnerabilities(mgr.assets, vulns)
+for a in mgr.assets[:3]:
+    print(a.hostname, "vulns:", len(getattr(a, "vulnerabilities", [])))
 ```
 
 ---
 
-# Part 3 — Walkthrough: Inventory Manager (Composition)
+## 4) Step: Decide what vulnerabilities deserve tickets
+
+Create: **`prioritization.py`**
 
 ```python
-class InventoryManager:
-    def __init__(self, sources: dict[str, InventorySource]):
-        self.sources = sources
-        self.assets: list[Asset] = []
+from asset import Asset
+from vulnerability import Vulnerability
 
-    def pull(self, source: str) -> None:
-        self.assets.clear()
-        if source == "all":
-            for src in self.sources.values():
-                self.assets.extend(src.fetch_assets())
-        else:
-            if source not in self.sources:
-                raise ValueError(f"Unknown source: {source}")
-            self.assets.extend(self.sources[source].fetch_assets())
+def should_ticket(asset: Asset, vuln: Vulnerability) -> bool:
+    # Ignore closed / false positives if your dataset has status
+    if (vuln.status or "").lower() in {"false_positive", "closed", "mitigated"}:
+        return False
 
-    def list_assets(self, source: str = "all") -> list[Asset]:
-        if source == "all":
-            return list(self.assets)
-        return [a for a in self.assets if a.source == source]
+    # Derive severity from CVSS (v3-style ranges)
+    try:
+        score = float(vuln.cvss_score) if vuln.cvss_score is not None else None
+    except (TypeError, ValueError):
+        score = None
 
-    def search(self, query: str, source: str = "all") -> list[Asset]:
-        return [a for a in self.list_assets(source) if a.matches(query)]
+    if score is None:
+        # If CVSS is missing/unparseable, don't auto-ticket by default
+        # (You could choose to ticket if exploit_available/internet_exposed instead.)
+        return False
 
-    def stats(self) -> dict[str, int]:
-        counts: dict[str, int] = {"total": len(self.assets)}
-        for a in self.assets:
-            counts[a.source] = counts.get(a.source, 0) + 1
-        return counts
+    if score >= 9.0:
+        sev = "critical"
+    elif score >= 7.0:
+        sev = "high"
+    elif score >= 4.0:
+        sev = "medium"
+    else:
+        sev = "low"
+
+    # Ticket anything High/Critical
+    if sev in {"critical", "high"}:
+        return True
+
+    # Escalate Medium if exploit available + prod
+    if sev == "medium" and vuln.exploit_available and (asset.environment or "").lower() == "prod":
+        return True
+
+    return False
 ```
-
-✅ **Checkpoint:** After pulling `all`, verify:
-
-* `stats()["total"] > 0`
-* counts by source make sense
 
 ---
 
-# Part 4 — Walkthrough: Build the CLI (argparse)
+## 5) Step: Create a Trello card (ticket)
 
-Replace your `__main__` with a real CLI:
+### A) Minimal Trello client
+
+Create: **`trello_client.py`**
 
 ```python
-import argparse
+import os
+import requests
+from typing import Any
 
+class TrelloClient:
+    def __init__(self):
+        self.key = os.environ.get("TRELLO_KEY")
+        self.token = os.environ.get("TRELLO_TOKEN")
+        self.list_id = os.environ.get("TRELLO_LIST_ID")
 
-def build_manager() -> InventoryManager:
-    sources = {
-        "netbox": NetboxInventorySource(NETBOX_API_URL),
-        "qualys": QualysInventorySource(QUALYS_API_URL),
-        "endpoint": EndpointInventorySource(ENDPOINT_API_URL),
-    }
-    return InventoryManager(sources)
+        if not self.key or not self.token or not self.list_id:
+            raise RuntimeError("Missing Trello env vars: TRELLO_KEY, TRELLO_TOKEN, TRELLO_LIST_ID")
 
+    def create_card(self, name: str, desc: str) -> dict[str, Any]:
+        url = "https://api.trello.com/1/cards"
+        params = {
+            "key": self.key,
+            "token": self.token,
+            "idList": self.list_id,
+            "name": name,
+            "desc": desc,
+        }
+        r = requests.post(url, params=params, timeout=10)
+        if r.status_code not in (200, 201):
+            raise RuntimeError(f"Trello create failed ({r.status_code}): {r.text[:200]}")
+        return r.json()
+```
 
-def cmd_pull(args) -> None:
+### B) Ticket formatting helper
+
+Create: **`ticket_builder.py`**
+
+```python
+from asset import Asset
+from vulnerability import Vulnerability
+
+def build_ticket(asset: Asset, vuln: Vulnerability) -> tuple[str, str]:
+    title = f"[{vuln.severity.upper()}] {vuln.cve_id} on {asset.hostname}"
+
+    desc_lines = [
+        "## Asset",
+        f"- Hostname: {asset.hostname}",
+        f"- IP: {asset.ip_address or 'n/a'}",
+        f"- OS: {asset.os or 'n/a'}",
+        f"- Environment: {asset.environment or 'n/a'}",
+        f"- Owner: {asset.owner_context or 'n/a'}",
+        f"- Source: {asset.source}",
+        "",
+        "## Vulnerability",
+        f"- CVE: {vuln.cve_id}",
+        f"- Title: {vuln.title}",
+        f"- Severity: {vuln.severity}",
+        f"- CVSS: {vuln.cvss_score if vuln.cvss_score is not None else 'n/a'}",
+        f"- Exploit available: {vuln.exploit_available}",
+        f"- Status: {vuln.status}",
+        "",
+        "## Recommended Fix",
+        vuln.recommended_fix or "n/a",
+        "",
+        "## Notes",
+        "This ticket was generated by the Ironclad Unified Inventory CLI as a simulation of remediation workflow.",
+    ]
+
+    return title, "\n".join(desc_lines)
+```
+
+---
+
+## 6) Step: Add a new CLI command to create Trello tickets
+
+### A) Add new command function in your main file
+
+Add imports near the top of `main.py`:
+
+```python
+from vulnerability_source import VulnerabilitySource
+from vulnerability_attach import attach_vulnerabilities
+from prioritization import should_ticket
+from trello_client import TrelloClient
+from ticket_builder import build_ticket
+
+VULN_API_URL = "https://my.api.mockaroo.com/ironclad/vulns/findings.json"
+```
+
+Add a command handler:
+
+```python
+def cmd_ticket(args) -> None:
     mgr = build_manager()
     mgr.pull(args.source)
-    s = mgr.stats()
-    print("Pulled inventory.")
-    print("Stats:", s)
 
+    vuln_src = VulnerabilitySource(VULN_API_URL, headers=headers)
+    vulns = vuln_src.fetch_vulns()
 
-def cmd_list(args) -> None:
-    mgr = build_manager()
-    mgr.pull(args.source)  # simple: list always pulls fresh
-    for a in mgr.list_assets(args.source):
-        print(a.summary())
+    attach_vulnerabilities(mgr.assets, vulns)
 
+    trello = TrelloClient()
+    created = 0
 
-def cmd_search(args) -> None:
-    mgr = build_manager()
-    mgr.pull(args.source)
-    results = mgr.search(args.query, args.source)
-    print(f"Results: {len(results)}")
-    for a in results[: args.limit]:
-        print(a.summary())
+    for asset in mgr.assets:
+        asset_vulns = getattr(asset, "vulnerabilities", [])
+        for v in asset_vulns:
+            if should_ticket(asset, v):
+                title, desc = build_ticket(asset, v)
+                trello.create_card(name=title, desc=desc)
+                created += 1
 
+                if args.limit and created >= args.limit:
+                    print(f"Created {created} cards (limit reached).")
+                    return
 
-def cmd_stats(args) -> None:
-    mgr = build_manager()
-    mgr.pull(args.source)
-    print("Stats:", mgr.stats())
-
-
-def main():
-    p = argparse.ArgumentParser(prog="ironclad-inventory", description="Ironclad Unified Inventory CLI")
-    sub = p.add_subparsers(dest="cmd", required=True)
-
-    p_pull = sub.add_parser("pull", help="Pull inventory from a source")
-    p_pull.add_argument("--source", choices=["netbox", "qualys", "endpoint", "all"], default="all")
-    p_pull.set_defaults(func=cmd_pull)
-
-    p_list = sub.add_parser("list", help="List assets")
-    p_list.add_argument("--source", choices=["netbox", "qualys", "endpoint", "all"], default="all")
-    p_list.set_defaults(func=cmd_list)
-
-    p_search = sub.add_parser("search", help="Search assets by keyword")
-    p_search.add_argument("--source", choices=["netbox", "qualys", "endpoint", "all"], default="all")
-    p_search.add_argument("--query", required=True)
-    p_search.add_argument("--limit", type=int, default=50)
-    p_search.set_defaults(func=cmd_search)
-
-    p_stats = sub.add_parser("stats", help="Show counts by source")
-    p_stats.add_argument("--source", choices=["netbox", "qualys", "endpoint", "all"], default="all")
-    p_stats.set_defaults(func=cmd_stats)
-
-    args = p.parse_args()
-    args.func(args)
-
-
-if __name__ == "__main__":
-    main()
+    print(f"Created {created} Trello cards.")
 ```
 
-✅ Required CLI behaviors (demo in your submission):
-
-```bash
-python ironclad_inventory_cli.py pull --source all
-python ironclad_inventory_cli.py list --source netbox
-python ironclad_inventory_cli.py search --query windows --source all
-python ironclad_inventory_cli.py stats --source all
-```
-
----
-
-# Part 5 — Required Student Work
-
-## A) Schema mapping notes (graded)
-
-In `README.md`, include a section:
-
-* **NetBox mapping:** `device_name → hostname`, `primary_ip → ip_address`, etc.
-* **Qualys mapping:** `operating_system → os`, `asset_group → environment`, etc.
-* **Endpoint mapping:** `local_ip → ip_address`, `logged_in_user → owner_context`, etc.
-
-## B) Output quality
-
-Your `Asset.summary()` should look consistent across sources.
-
----
-
-# Part 6 — Challenge Extensions (Choose 3)
-
-### Challenge A — Deduplicate by hostname
-
-If hostname matches across sources, treat as the same asset and keep a list of sources seen.
-
-### Challenge B — Filters on `list`
-
-Add optional flags:
-
-* `--os`
-* `--environment`
-* `--owner`
-
-### Challenge C — Output formats
-
-Support:
-
-* `--format table` (default)
-* `--format json`
-
-### Challenge D — Find by IP
+### B) Register the command in `main()`
 
 Add:
 
-```bash
-python ironclad_inventory_cli.py find-ip --ip 10.0.0.5
+```python
+p_ticket = sub.add_parser("ticket", help="Create Trello tickets for prioritized vulnerabilities")
+p_ticket.add_argument("--source", choices=["netbox", "qualys", "crowdstrike", "all"], default="all")
+p_ticket.add_argument("--limit", type=int, default=20, help="Max cards to create in one run")
+p_ticket.set_defaults(func=cmd_ticket)
 ```
 
-### Challenge E — Cache to disk
+✅ **How students run it:**
 
-Save pulled normalized assets to `inventory_cache.json` and allow `--from-cache`.
-
----
-
-# Deliverables
-
-Submit:
-
-1. `ironclad_inventory_cli.py`
-2. `README.md` containing:
-
-   * how to run each CLI command
-   * your schema field mapping notes
-   * which 3 challenges you completed
-3. Terminal output (paste or screenshot) showing:
-
-   * pull all
-   * list one source
-   * search across all
-   * stats
+```bash
+python ironclad_inventory_cli.py ticket --source all --limit 10
+```
 
 ---
 
-# Rubric (100 points)
+## 7) Notes for Students (Important)
 
-* 15 — JSON inspection + mapping notes are correct and thoughtful
-* 20 — `Asset` class design + methods (`matches`, `summary`) are solid
-* 20 — Source adapters correctly normalize each schema
-* 15 — `InventoryManager` functions correctly
-* 15 — CLI works (`pull`, `list`, `search`, `stats`)
-* 15 — Three challenges completed and documented
+### A) Don’t spam Trello
 
----
+Use `--limit` while testing.
 
-## Future Extension Readiness (Do not implement yet)
+### B) Expected outcomes
 
-Your design should make it easy to later add:
+* Some vulnerabilities won’t match assets (that’s realistic)
+* Some assets may have many vulnerabilities
+* Your prioritization function controls ticket volume
 
-* `Vulnerability` objects tied to `Asset`
-* vulnerability enrichment API calls
-* Trello card creation for prioritized items
 
-Stop at inventory normalization and CLI operations for this assignment.
+## 8) Optional upgrade: prevent duplicate Trello cards (simple dedupe)
+
+If you want a quick extension: keep a set of `(hostname,cve)` keys created in this run:
+
+```python
+seen = set()
+...
+key = (asset.hostname.lower(), v.cve_id)
+if key in seen:
+    continue
+seen.add(key)
+```
